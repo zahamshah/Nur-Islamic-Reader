@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { X, Link2, Quote } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeConfig } from '@/types/content';
 
 interface Props {
@@ -67,6 +68,7 @@ export default React.memo(function ShareModal({
   currentSubheading,
   currentSectionText,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const quoteExcerpt = useMemo(() => {
     if (currentSectionText) {
       const clean = stripMarkdown(currentSectionText);
@@ -146,7 +148,10 @@ export default React.memo(function ShareModal({
         <Pressable
           style={[
             styles.sheet,
-            { backgroundColor: themeColors.surface },
+            {
+              backgroundColor: themeColors.surface,
+              paddingBottom: insets.bottom + 24,
+            },
           ]}
           onPress={(e) => e.stopPropagation()}
         >
@@ -228,7 +233,7 @@ export default React.memo(function ShareModal({
                 style={[styles.previewExcerpt, { color: themeColors.textSecondary }]}
                 numberOfLines={3}
               >
-                "{quoteExcerpt.slice(0, 140)}..."
+                {`"${quoteExcerpt.slice(0, 140)}..."`}
               </Text>
             </View>
           </View>
@@ -317,23 +322,22 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    paddingBottom: 44,
   },
   handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
+    width: 42,
+    height: 5,
+    borderRadius: 999,
     alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 20,
+    marginTop: 12,
+    marginBottom: 18,
   },
   closeBtn: {
     position: 'absolute',
-    top: 14,
-    right: 16,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    top: 16,
+    right: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
@@ -347,7 +351,7 @@ const styles = StyleSheet.create({
   },
   preview: {
     padding: 16,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     gap: 10,
   },
@@ -403,7 +407,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     padding: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
   },
   optionIcon: {

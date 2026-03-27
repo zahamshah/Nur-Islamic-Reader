@@ -1,11 +1,3 @@
-export interface GlossaryEntry {
-  id: string;
-  label: string;
-  description: string;
-  image?: string;
-  caption?: string;
-}
-
 export interface Chapter {
   id: string;
   title: string;
@@ -22,7 +14,6 @@ export interface Series {
   coverImage: number;
   tags: string[];
   chapters: Chapter[];
-  glossary: GlossaryEntry[];
 }
 
 export type ReaderTheme = 'light' | 'dark' | 'sepia';
@@ -31,6 +22,9 @@ export interface ReaderSettings {
   fontSize: number;
   lineHeight: number;
   theme: ReaderTheme;
+  speechRate: number;
+  speechPitch: number;
+  speechVoiceId: string | null;
 }
 
 export interface ReadingProgress {
@@ -43,7 +37,15 @@ export interface ReadingProgress {
   scrollPercentage: number;
 }
 
-export type AppTheme = 'light' | 'dark' | 'oasis' | 'midnight-gold' | 'desert-rose' | 'ocean-depth';
+export type AppTheme =
+  | 'light'
+  | 'dark'
+  | 'oasis'
+  | 'midnight-gold'
+  | 'midnight-onyx'
+  | 'crisp-alabaster'
+  | 'desert-rose'
+  | 'ocean-depth';
 
 export interface ThemeConfig {
   id: AppTheme;

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -36,7 +36,13 @@ function timeAgo(ts: number): string {
 export default React.memo(function HistoryModal({ visible, onClose, themeColors, isDark }: Props) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { history, clearHistory } = useReadingHistory();
+  const { history, clearHistory, refreshHistory, loaded } = useReadingHistory();
+
+  useEffect(() => {
+    if (visible) {
+      refreshHistory();
+    }
+  }, [refreshHistory, visible]);
 
   const handlePress = useCallback((entry: HistoryEntry) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -111,10 +117,18 @@ export default React.memo(function HistoryModal({ visible, onClose, themeColors,
 
           <ScrollView
             style={styles.list}
+            contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             bounces={false}
           >
-            {history.length === 0 ? (
+            {!loaded ? (
+              <View style={styles.emptyState}>
+                <BookOpen size={32} color={themeColors.textMuted} />
+                <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
+                  Loading recent reads...
+                </Text>
+              </View>
+            ) : history.length === 0 ? (
               <View style={styles.emptyState}>
                 <BookOpen size={32} color={themeColors.textMuted} />
                 <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>
@@ -212,18 +226,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     paddingTop: 10,
     paddingHorizontal: 20,
-    maxHeight: '55%',
+    maxHeight: '58%',
   },
   handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
+    width: 42,
+    height: 5,
+    borderRadius: 999,
     alignSelf: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   header: {
     flexDirection: 'row',
@@ -237,7 +251,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '700' as const,
     letterSpacing: -0.3,
   },
@@ -247,21 +261,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   clearBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   list: {
-    flex: 1,
+    paddingBottom: 4,
+  },
+  listContent: {
+    paddingBottom: 20,
   },
   emptyState: {
     alignItems: 'center',
@@ -281,7 +298,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 14,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     gap: 12,
   },

@@ -154,7 +154,15 @@ export default React.memo(function SearchModal({ visible, onClose, themeColors, 
       onRequestClose={handleClose}
     >
       <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <View
+          style={[
+            styles.header,
+            {
+              paddingTop: insets.top + 8,
+              borderBottomColor: themeColors.divider,
+            },
+          ]}
+        >
           <View
             style={[
               styles.searchBar,
@@ -195,7 +203,7 @@ export default React.memo(function SearchModal({ visible, onClose, themeColors, 
 
         <ScrollView
           style={styles.results}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 20, paddingTop: 14 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -294,13 +302,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     gap: 12,
+    borderBottomWidth: 1,
   },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    height: 42,
-    borderRadius: 12,
+    height: 44,
+    borderRadius: 14,
     borderWidth: 1,
     paddingHorizontal: 12,
     gap: 8,
@@ -342,7 +351,7 @@ const styles = StyleSheet.create({
   },
   resultItem: {
     padding: 14,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     marginBottom: 10,
   },

@@ -1,6 +1,6 @@
 const { getDefaultConfig } = require("expo/metro-config");
-const { withRorkMetro } = require("@rork-ai/toolkit-sdk/metro");
 
 const config = getDefaultConfig(__dirname);
+config.resolver.assetExts.push("onnx", "txt", "zip");
 
-module.exports = withRorkMetro(config);
+module.exports = config;

@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import { BookOpen } from 'lucide-react-native';
+import { BookOpen, ChevronRight } from 'lucide-react-native';
 import { useAppSettings } from '@/context/AppSettingsContext';
 import { Series } from '@/types/content';
 
@@ -31,16 +31,37 @@ export default React.memo(function SeriesCard({ series }: Props) {
       ]}
       testID={`series-card-${series.id}`}
     >
-      <Image
-        source={series.coverImage}
-        style={[styles.cover, { backgroundColor: colors.tagBg }]}
-        resizeMode="cover"
-      />
+      <View style={styles.coverWrap}>
+        <Image
+          source={series.coverImage}
+          style={[styles.cover, { backgroundColor: colors.tagBg }]}
+          resizeMode="cover"
+        />
+        <View
+          style={[
+            styles.coverOverlay,
+            {
+              backgroundColor: 'rgba(0,0,0,0.16)',
+            },
+          ]}
+        />
+        <View style={styles.coverTopRow}>
+          <View style={[styles.coverPill, { backgroundColor: 'rgba(255,255,255,0.16)' }]}>
+            <Text style={styles.coverPillText}>Series</Text>
+          </View>
+          <View style={[styles.coverPill, styles.coverCountPill]}>
+            <BookOpen size={12} color="#FFFFFF" />
+            <Text style={styles.coverPillText}>
+              {series.chapters.length} {series.chapters.length === 1 ? 'Chapter' : 'Chapters'}
+            </Text>
+          </View>
+        </View>
+      </View>
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
           {series.title}
         </Text>
-        <Text style={[styles.description, { color: colors.textSecondary }]} numberOfLines={2}>
+        <Text style={[styles.description, { color: colors.textSecondary }]} numberOfLines={3}>
           {series.description}
         </Text>
         <View style={styles.footer}>
@@ -51,11 +72,11 @@ export default React.memo(function SeriesCard({ series }: Props) {
               </View>
             ))}
           </View>
-          <View style={styles.chapterCount}>
-            <BookOpen size={13} color={colors.textMuted} />
-            <Text style={[styles.chapterCountText, { color: colors.textMuted }]}>
-              {series.chapters.length} {series.chapters.length === 1 ? 'chapter' : 'chapters'}
+          <View style={styles.ctaWrap}>
+            <Text style={[styles.ctaText, { color: colors.accent }]}>
+              Open
             </Text>
+            <ChevronRight size={16} color={colors.accent} />
           </View>
         </View>
       </View>
@@ -65,41 +86,75 @@ export default React.memo(function SeriesCard({ series }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 16,
+    borderRadius: 22,
     overflow: 'hidden',
     borderWidth: 1,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 22,
+    elevation: 5,
   },
   cardPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.985 }],
+    opacity: 0.94,
+    transform: [{ scale: 0.988 }],
+  },
+  coverWrap: {
+    position: 'relative',
   },
   cover: {
     width: '100%',
-    height: 180,
+    height: 196,
+  },
+  coverOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  coverTopRow: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    right: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  coverPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  coverCountPill: {
+    backgroundColor: 'rgba(12,12,12,0.34)',
+  },
+  coverPillText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700' as const,
+    letterSpacing: 0.45,
+    textTransform: 'uppercase' as const,
   },
   content: {
-    padding: 18,
-    gap: 8,
+    padding: 20,
+    gap: 10,
   },
   title: {
-    fontSize: 19,
-    fontWeight: '700' as const,
-    letterSpacing: -0.3,
+    fontSize: 21,
+    fontWeight: '800' as const,
+    letterSpacing: -0.45,
   },
   description: {
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 21,
   },
   footer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginTop: 4,
+    gap: 12,
   },
   tags: {
     flexDirection: 'row',
@@ -114,16 +169,19 @@ const styles = StyleSheet.create({
   },
   tagText: {
     fontSize: 11,
-    fontWeight: '600' as const,
+    fontWeight: '700' as const,
     textTransform: 'uppercase' as const,
-    letterSpacing: 0.5,
+    letterSpacing: 0.55,
   },
-  chapterCount: {
+  ctaWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
-  chapterCountText: {
+  ctaText: {
     fontSize: 12,
+    fontWeight: '700' as const,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase' as const,
   },
 });

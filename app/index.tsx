@@ -179,7 +179,9 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   headerLeft: {
-    gap: 2,
+    gap: 3,
+    flex: 1,
+    paddingRight: 16,
   },
   appName: {
     fontSize: 28,
@@ -212,19 +214,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 22,
-    fontWeight: '700' as const,
-    letterSpacing: -0.3,
+    fontWeight: '800' as const,
+    letterSpacing: -0.35,
   },
   sectionCount: {
     fontSize: 13,
-    fontWeight: '500' as const,
+    fontWeight: '700' as const,
+    letterSpacing: 0.25,
+    textTransform: 'uppercase' as const,
   },
   seriesList: {
-    gap: 18,
+    gap: 20,
   },
   footer: {
     marginTop: 16,

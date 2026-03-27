@@ -1,7 +1,6 @@
 import React, { useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import * as Haptics from 'expo-haptics';
-import { GlossaryEntry } from '@/types/content';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { prepareMarkdownForDisplay } from '@/utils/chapterMarkdown';
 
 export interface MarkdownThemeColors {
   text: string;
@@ -15,18 +14,18 @@ export interface MarkdownThemeColors {
 
 interface Props {
   markdown: string;
+  chapterTitle?: string;
   fontSize: number;
   lineHeight: number;
   themeColors: MarkdownThemeColors;
   isDark: boolean;
-  glossary: GlossaryEntry[];
-  onGlossaryTap: (entry: GlossaryEntry) => void;
+  onHeadingPress?: (heading: string) => void;
+  selectableHeadings?: boolean;
 }
 
 interface TextSegment {
-  type: 'text' | 'bold' | 'italic' | 'bolditalic' | 'glossary';
+  type: 'text' | 'bold' | 'italic' | 'bolditalic';
   content: string;
-  glossaryId?: string;
 }
 
 interface ParsedBlock {
@@ -35,35 +34,9 @@ interface ParsedBlock {
   raw: string;
 }
 
-function sanitizeMarkdown(raw: string): string {
-  let text = raw;
-  text = text.replace(/\uFEFF/g, '');
-  text = text.replace(/\u200B|\u200C|\u200D|\uFEFF/g, '');
-
-  const lines = text.split('\n');
-  const hasBulkPrefix = lines.filter((l) => l.length > 0).every((l) => l.startsWith('# ') || l.trim() === '');
-  if (hasBulkPrefix) {
-    text = lines.map((l) => (l.startsWith('# ') ? l.slice(2) : l)).join('\n');
-  }
-
-  text = text.replace(/\\\[\\\[/g, '[[');
-  text = text.replace(/\\\]\\\]/g, ']]');
-  text = text.replace(/\\\[\[/g, '[[');
-  text = text.replace(/\]\\\]/g, ']]');
-  text = text.replace(/\[\[([^\]|]+)\}\]\]/g, '[[$1]]');
-  text = text.replace(/\[\[([^\]|]+)\|([^\]]+)\}\]\]/g, '[[$1|$2]]');
-  text = text.replace(/\[\[([^\]]+)\]\}/g, '[[$1]]');
-  text = text.replace(/\\#/g, '#');
-  text = text.replace(/\\\*\\\*/g, '**');
-  text = text.replace(/\\\*/g, '*');
-  text = text.replace(/\\-/g, '-');
-  text = text.replace(/&nbsp;/g, ' ');
-  return text;
-}
-
 function parseInlineSegments(text: string): TextSegment[] {
   const segments: TextSegment[] = [];
-  const pattern = /(\[\[([^\]|]+)\|([^\]]+)\]\])|\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*/g;
+  const pattern = /\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -72,13 +45,11 @@ function parseInlineSegments(text: string): TextSegment[] {
       segments.push({ type: 'text', content: text.slice(lastIndex, match.index) });
     }
     if (match[1]) {
-      segments.push({ type: 'glossary', content: match[2], glossaryId: match[3] });
-    } else if (match[4]) {
-      segments.push({ type: 'bolditalic', content: match[4] });
-    } else if (match[5]) {
-      segments.push({ type: 'bold', content: match[5] });
-    } else if (match[6]) {
-      segments.push({ type: 'italic', content: match[6] });
+      segments.push({ type: 'bolditalic', content: match[1] });
+    } else if (match[2]) {
+      segments.push({ type: 'bold', content: match[2] });
+    } else if (match[3]) {
+      segments.push({ type: 'italic', content: match[3] });
     }
     lastIndex = match.index + match[0].length;
   }
@@ -90,8 +61,8 @@ function parseInlineSegments(text: string): TextSegment[] {
   return segments;
 }
 
-function parseMarkdown(raw: string): ParsedBlock[] {
-  const sanitized = sanitizeMarkdown(raw);
+function parseMarkdown(raw: string, chapterTitle?: string): ParsedBlock[] {
+  const sanitized = prepareMarkdownForDisplay(raw, chapterTitle);
   const lines = sanitized.split('\n');
   const blocks: ParsedBlock[] = [];
   let i = 0;
@@ -177,35 +148,16 @@ function parseMarkdown(raw: string): ParsedBlock[] {
 
 export default React.memo(function MarkdownRenderer({
   markdown,
+  chapterTitle,
   fontSize,
   lineHeight,
   themeColors,
   isDark,
-  glossary,
-  onGlossaryTap,
+  onHeadingPress,
+  selectableHeadings = false,
 }: Props) {
-  const blocks = useMemo(() => parseMarkdown(markdown), [markdown]);
+  const blocks = useMemo(() => parseMarkdown(markdown, chapterTitle), [chapterTitle, markdown]);
   const computedLineHeight = fontSize * lineHeight;
-  const glossaryById = useMemo(() => {
-    const mapped = new Map<string, GlossaryEntry>();
-    glossary.forEach((entry) => {
-      mapped.set(entry.id, entry);
-    });
-    return mapped;
-  }, [glossary]);
-
-  const handleGlossaryPress = useCallback(
-    (id: string) => {
-      const entry = glossaryById.get(id);
-      if (entry) {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onGlossaryTap(entry);
-      } else {
-        console.log('[MarkdownRenderer] Glossary entry not found, rendering as plain text:', id);
-      }
-    },
-    [glossaryById, onGlossaryTap]
-  );
 
   const renderSegments = useCallback(
     (segments: TextSegment[], baseStyle: object) => {
@@ -232,41 +184,6 @@ export default React.memo(function MarkdownRenderer({
                 {seg.content}
               </Text>
             );
-          case 'glossary': {
-            const hasGlossaryEntry = seg.glossaryId ? glossaryById.has(seg.glossaryId) : false;
-
-            if (!hasGlossaryEntry) {
-              return (
-                <Text key={idx} style={baseStyle}>
-                  {seg.content}
-                </Text>
-              );
-            }
-
-            return (
-              <Text
-                key={idx}
-                testID={`glossary-chip-${seg.glossaryId}`}
-                onPress={() => {
-                  if (seg.glossaryId) {
-                    handleGlossaryPress(seg.glossaryId);
-                  }
-                }}
-                style={[
-                  baseStyle,
-                  {
-                    backgroundColor: isDark ? 'rgba(196,154,60,0.15)' : themeColors.accentMuted,
-                    color: isDark ? themeColors.accentLight : themeColors.primary,
-                    fontWeight: '600' as const,
-                    borderRadius: 4,
-                    overflow: 'hidden',
-                  },
-                ]}
-              >
-                {' '}{seg.content}{' '}
-              </Text>
-            );
-          }
           default:
             return (
               <Text key={idx} style={baseStyle}>
@@ -276,70 +193,114 @@ export default React.memo(function MarkdownRenderer({
         }
       });
     },
-    [glossaryById, handleGlossaryPress, isDark, themeColors]
+    []
   );
+
+  const renderHeadingBlock = (
+    block: ParsedBlock,
+    level: 'h1' | 'h2' | 'h3',
+    key: number
+  ) => {
+    const touchable = Boolean(onHeadingPress) && selectableHeadings;
+    const isPrimary = level === 'h1';
+    const isSecondary = level === 'h2';
+    const compactWords = block.raw.trim().split(/\s+/).filter(Boolean).length;
+    const isCompact = !isPrimary && compactWords <= 2;
+    const headingSize = isPrimary ? fontSize + 10 : isSecondary ? fontSize + 5 : fontSize + 2;
+    const headingLineHeight = headingSize * (isPrimary ? 1.25 : 1.3);
+
+    const blockStyle = [
+      styles.headingBlock,
+      isPrimary
+        ? styles.headingBlockH1
+        : isCompact
+          ? styles.headingBlockCompact
+          : isSecondary
+            ? styles.headingBlockH2
+            : styles.headingBlockH3,
+      isPrimary
+        ? {
+            borderTopColor: themeColors.accentMuted,
+            borderBottomColor: themeColors.accentMuted,
+            backgroundColor: isDark ? 'rgba(196,154,60,0.04)' : 'rgba(196,154,60,0.03)',
+          }
+        : isCompact
+          ? {
+              borderTopColor: themeColors.accentMuted,
+              borderBottomColor: themeColors.accentMuted,
+              backgroundColor: isDark ? 'rgba(196,154,60,0.08)' : 'rgba(196,154,60,0.06)',
+            }
+          : isSecondary
+            ? {
+                borderTopColor: themeColors.accentMuted,
+                borderBottomColor: themeColors.accentMuted,
+                backgroundColor: isDark
+                  ? 'rgba(196,154,60,0.06)'
+                  : 'rgba(196,154,60,0.045)',
+              }
+            : {
+                borderColor: themeColors.accentMuted,
+                backgroundColor: isDark
+                  ? 'rgba(196,154,60,0.06)'
+                  : 'rgba(196,154,60,0.05)',
+              },
+    ];
+
+    const content = (
+      <Text
+        style={[
+          level === 'h1'
+            ? styles.h1
+            : isCompact
+              ? styles.headingCompact
+              : level === 'h2'
+                ? styles.h2
+                : styles.h3,
+          {
+            color: themeColors.accent,
+            fontSize: headingSize,
+            lineHeight: headingLineHeight,
+            textAlign: 'center',
+            alignSelf: 'stretch',
+          },
+        ]}
+      >
+        {renderSegments(block.segments, {
+          color: themeColors.accent,
+          fontSize: headingSize,
+        })}
+      </Text>
+    );
+
+    if (touchable) {
+      return (
+        <Pressable
+          key={key}
+          onPress={() => onHeadingPress?.(block.raw)}
+          style={({ pressed }) => [blockStyle, pressed && styles.headingPressed]}
+        >
+          {content}
+        </Pressable>
+      );
+    }
+
+    return (
+      <View key={key} style={blockStyle}>
+        {content}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
       {blocks.map((block, i) => {
         switch (block.type) {
           case 'h1':
-            return (
-              <Text
-                key={i}
-                style={[
-                  styles.h1,
-                  {
-                    color: themeColors.text,
-                    fontSize: fontSize + 10,
-                    lineHeight: (fontSize + 10) * 1.25,
-                  },
-                ]}
-              >
-                {renderSegments(block.segments, {
-                  color: themeColors.text,
-                  fontSize: fontSize + 10,
-                })}
-              </Text>
-            );
+            return renderHeadingBlock(block, 'h1', i);
           case 'h2':
-            return (
-              <Text
-                key={i}
-                style={[
-                  styles.h2,
-                  {
-                    color: themeColors.text,
-                    fontSize: fontSize + 5,
-                    lineHeight: (fontSize + 5) * 1.3,
-                  },
-                ]}
-              >
-                {renderSegments(block.segments, {
-                  color: themeColors.text,
-                  fontSize: fontSize + 5,
-                })}
-              </Text>
-            );
+            return renderHeadingBlock(block, 'h2', i);
           case 'h3':
-            return (
-              <Text
-                key={i}
-                style={[
-                  styles.h3,
-                  {
-                    color: themeColors.text,
-                    fontSize: fontSize + 2,
-                    lineHeight: (fontSize + 2) * 1.3,
-                  },
-                ]}
-              >
-                {renderSegments(block.segments, {
-                  color: themeColors.text,
-                  fontSize: fontSize + 2,
-                })}
-              </Text>
-            );
+            return renderHeadingBlock(block, 'h3', i);
           case 'blockquote':
             return (
               <View
@@ -386,7 +347,7 @@ export default React.memo(function MarkdownRenderer({
                     { color: themeColors.accent, fontSize, lineHeight: computedLineHeight },
                   ]}
                 >
-                  •
+                  {"\u2022"}
                 </Text>
                 <Text
                   style={{
@@ -430,30 +391,86 @@ const styles = StyleSheet.create({
   container: {
     paddingVertical: 8,
   },
+  headingBlock: {
+    alignSelf: 'center',
+    width: '100%',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  headingBlockH1: {
+    marginTop: 8,
+    marginBottom: 22,
+    paddingTop: 12,
+    paddingBottom: 16,
+    paddingHorizontal: 14,
+    alignSelf: 'center',
+    width: '96%',
+    maxWidth: 680,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderRadius: 18,
+  },
+  headingBlockCompact: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    width: '88%',
+    maxWidth: 520,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderRadius: 16,
+  },
+  headingBlockH2: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    width: '92%',
+    maxWidth: 620,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderRadius: 18,
+  },
+  headingBlockH3: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    width: '84%',
+    maxWidth: 520,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderRadius: 999,
+  },
   h1: {
     fontWeight: '800' as const,
-    marginBottom: 18,
-    marginTop: 8,
     letterSpacing: -0.5,
+    textAlign: 'center' as const,
   },
   h2: {
     fontWeight: '700' as const,
-    marginBottom: 12,
-    marginTop: 28,
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
+    textAlign: 'center' as const,
   },
   h3: {
-    fontWeight: '600' as const,
-    marginBottom: 10,
-    marginTop: 22,
+    fontWeight: '700' as const,
+    letterSpacing: 0.1,
+    textAlign: 'center' as const,
+  },
+  headingCompact: {
+    textAlign: 'center' as const,
+    letterSpacing: 0.2,
+  },
+  headingPressed: {
+    opacity: 0.82,
   },
   blockquote: {
     borderLeftWidth: 3,
     paddingLeft: 16,
-    paddingVertical: 12,
-    paddingRight: 12,
+    paddingVertical: 13,
+    paddingRight: 14,
     marginVertical: 16,
-    borderRadius: 4,
+    borderRadius: 12,
   },
   hr: {
     height: 1,

@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import createContextHook from '@nkzw/create-context-hook';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { AppTheme, ThemeConfig } from '@/types/content';
-import { getThemeById } from '@/constants/themes';
+import { APP_THEMES, getThemeById } from '@/constants/themes';
 
 const THEME_KEY = 'app_theme';
 const PURCHASED_KEY = 'purchased_themes';
@@ -51,6 +51,15 @@ export const [AppSettingsProvider, useAppSettings] = createContextHook(() => {
     });
   }, []);
 
+  const purchaseAllThemes = useCallback(() => {
+    const premiumIds = APP_THEMES.filter((theme) => theme.isPremium).map((theme) => theme.id);
+    setPurchasedThemes((prev) => {
+      const next = Array.from(new Set([...prev, ...premiumIds]));
+      AsyncStorage.setItem(PURCHASED_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const isThemePurchased = useCallback(
     (id: AppTheme) => purchasedThemes.includes(id),
     [purchasedThemes]
@@ -62,6 +71,7 @@ export const [AppSettingsProvider, useAppSettings] = createContextHook(() => {
     loaded,
     setTheme,
     purchaseTheme,
+    purchaseAllThemes,
     isThemePurchased,
     purchasedThemes,
   };

@@ -1,14 +1,11 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
-  Linking,
   Alert,
-  Animated,
-  Platform,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,13 +25,21 @@ import {
 } from 'lucide-react-native';
 import { useAppSettings } from '@/context/AppSettingsContext';
 import { APP_THEMES, isDarkTheme } from '@/constants/themes';
-import { AppTheme, ThemeConfig } from '@/types/content';
+import { ThemeConfig } from '@/types/content';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { currentThemeId, theme, setTheme, purchaseTheme, isThemePurchased } = useAppSettings();
+  const {
+    currentThemeId,
+    theme,
+    setTheme,
+    purchaseTheme,
+    purchaseAllThemes,
+    isThemePurchased,
+  } = useAppSettings();
   const [purchasingTheme, setPurchasingTheme] = useState<string | null>(null);
+  const [purchasingAll, setPurchasingAll] = useState<boolean>(false);
 
   const colors = theme.colors;
   const dark = isDarkTheme(currentThemeId);
@@ -44,7 +49,9 @@ export default function SettingsScreen() {
       if (t.isPremium && !isThemePurchased(t.id)) {
         Alert.alert(
           `Unlock ${t.name}`,
-          `This theme costs ${t.price} — a small way to support this free app. All proceeds go toward keeping Nūr ad-free and open.\n\nWould you like to unlock it?`,
+          `This theme costs ${t.price} - a small way to support this free app. All proceeds go toward keeping Nur ad-free and open.
+
+Would you like to unlock it?`,
           [
             { text: 'Cancel', style: 'cancel' },
             {
@@ -59,6 +66,18 @@ export default function SettingsScreen() {
                 }, 800);
               },
             },
+            {
+              text: 'Unlock All $2.99',
+              onPress: () => {
+                setPurchasingAll(true);
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                setTimeout(() => {
+                  purchaseAllThemes();
+                  setTheme(t.id);
+                  setPurchasingAll(false);
+                }, 800);
+              },
+            },
           ]
         );
         return;
@@ -66,8 +85,36 @@ export default function SettingsScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setTheme(t.id);
     },
-    [isThemePurchased, purchaseTheme, setTheme]
+    [isThemePurchased, purchaseAllThemes, purchaseTheme, setTheme]
   );
+
+  const premiumThemeIds = useMemo(
+    () => APP_THEMES.filter((t) => t.isPremium).map((t) => t.id),
+    []
+  );
+  const allUnlocked = premiumThemeIds.every((id) => isThemePurchased(id));
+
+  const orderedThemes = useMemo(() => {
+    const lightThemes = APP_THEMES.filter((t) => !isDarkTheme(t.id));
+    const darkThemes = APP_THEMES.filter((t) => isDarkTheme(t.id));
+    const max = Math.max(lightThemes.length, darkThemes.length);
+    const ordered: ThemeConfig[] = [];
+    for (let i = 0; i < max; i += 1) {
+      if (lightThemes[i]) ordered.push(lightThemes[i]);
+      if (darkThemes[i]) ordered.push(darkThemes[i]);
+    }
+    return ordered;
+  }, []);
+
+  const handleUnlockAll = useCallback(() => {
+    if (allUnlocked) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setPurchasingAll(true);
+    setTimeout(() => {
+      purchaseAllThemes();
+      setPurchasingAll(false);
+    }, 800);
+  }, [allUnlocked, purchaseAllThemes]);
 
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
 
@@ -98,7 +145,7 @@ export default function SettingsScreen() {
         style={[
           styles.header,
           {
-            paddingTop: insets.top + 4,
+            paddingTop: Math.max(insets.top - 8, 8),
             borderBottomColor: colors.divider,
           },
         ]}
@@ -135,12 +182,48 @@ export default function SettingsScreen() {
             Choose how Nūr looks across the entire app
           </Text>
 
-          <View style={styles.themeGrid}>
-            {APP_THEMES.map((t) => {
+          
+
+          {!allUnlocked && (
+            <Pressable
+              onPress={handleUnlockAll}
+              style={({ pressed }) => [
+                styles.unlockAllCard,
+                {
+                  backgroundColor: dark ? 'rgba(255,255,255,0.04)' : colors.surface,
+                  borderColor: colors.cardBorder,
+                },
+                pressed && styles.unlockAllPressed,
+              ]}
+            >
+              <View style={[styles.unlockAllIcon, { backgroundColor: colors.accentMuted }]}>
+                <Sparkles size={16} color={colors.accent} />
+              </View>
+              <View style={styles.unlockAllContent}>
+                <Text style={[styles.unlockAllTitle, { color: colors.text }]}>
+                  Unlock All Themes
+                </Text>
+                <Text style={[styles.unlockAllDesc, { color: colors.textSecondary }]}>
+                  One-time access to every premium theme.
+                </Text>
+              </View>
+              <View style={[styles.unlockAllPrice, { backgroundColor: colors.accentMuted }]}>
+                <Text style={[styles.unlockAllPriceText, { color: colors.accent }]}>
+                  {purchasingAll ? 'Unlocking...' : '$2.99'}
+                </Text>
+                <Text style={[styles.unlockAllPriceSub, { color: colors.textMuted }]}>
+                  All themes
+                </Text>
+              </View>
+            </Pressable>
+          )}
+<View style={styles.themeGrid}>
+            {orderedThemes.map((t) => {
               const isActive = currentThemeId === t.id;
               const isPurchased = isThemePurchased(t.id);
               const isLocked = t.isPremium && !isPurchased;
               const isPurchasing = purchasingTheme === t.id;
+              const darkThemeCard = isDarkTheme(t.id);
 
               return (
                 <Pressable
@@ -157,26 +240,98 @@ export default function SettingsScreen() {
                   ]}
                   testID={`theme-card-${t.id}`}
                 >
-                  <View style={styles.themePreview}>
+                  <View style={styles.themeTopRow}>
                     <View
                       style={[
-                        styles.previewDot,
-                        { backgroundColor: t.colors.primary },
+                        styles.themeTonePill,
+                        {
+                          backgroundColor: darkThemeCard
+                            ? 'rgba(255,255,255,0.08)'
+                            : 'rgba(0,0,0,0.05)',
+                        },
                       ]}
-                    />
-                    <View
-                      style={[
-                        styles.previewDot,
-                        { backgroundColor: t.colors.accent },
-                      ]}
-                    />
-                    <View
-                      style={[
-                        styles.previewDot,
-                        { backgroundColor: t.colors.background },
-                        { borderWidth: 1, borderColor: t.colors.cardBorder },
-                      ]}
-                    />
+                    >
+                      <Text style={[styles.themeToneText, { color: t.colors.textSecondary }]}>
+                        {darkThemeCard ? 'Dark' : 'Light'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.themePreviewPanel,
+                      {
+                        backgroundColor: t.colors.background,
+                        borderColor: t.colors.cardBorder,
+                      },
+                    ]}
+                  >
+                    <View style={styles.themePreviewChrome}>
+                      <View
+                        style={[
+                          styles.previewLine,
+                          { width: '34%', backgroundColor: t.colors.cardBorder },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.previewLine,
+                          { width: '18%', backgroundColor: t.colors.cardBorder },
+                        ]}
+                      />
+                    </View>
+
+                    <View style={styles.themePreviewBody}>
+                      <View
+                        style={[
+                          styles.previewMiniCard,
+                          {
+                            backgroundColor: t.colors.surface,
+                            borderColor: t.colors.cardBorder,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.previewAccentBar,
+                            { backgroundColor: t.colors.accent },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.previewMiniTextRow,
+                            { backgroundColor: darkThemeCard ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)' },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.previewMiniTextRowShort,
+                            { backgroundColor: darkThemeCard ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)' },
+                          ]}
+                        />
+                      </View>
+
+                      <View style={styles.themePreview}>
+                        <View
+                          style={[
+                            styles.previewDot,
+                            { backgroundColor: t.colors.primary },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.previewDot,
+                            { backgroundColor: t.colors.accent },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.previewDot,
+                            { backgroundColor: t.colors.background, borderWidth: 1, borderColor: t.colors.cardBorder },
+                          ]}
+                        />
+                      </View>
+                    </View>
                   </View>
 
                   <Text
@@ -302,7 +457,7 @@ export default function SettingsScreen() {
           >
             <Sparkles size={14} color={colors.accent} />
             <Text style={[styles.premiumNoteText, { color: colors.textSecondary }]}>
-              Premium themes ($0.99 each) are another great way to support this app. Every purchase keeps Nūr alive and growing.
+              Premium themes are $0.99 each, or unlock them all for $2.99. Every purchase keeps Nur alive and growing.
             </Text>
           </View>
         </View>
@@ -424,7 +579,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 24,
+    paddingTop: 8,
   },
   section: {
     marginBottom: 8,
@@ -445,6 +600,52 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 18,
   },
+  unlockAllCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  unlockAllPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  unlockAllIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unlockAllContent: {
+    flex: 1,
+    gap: 4,
+  },
+  unlockAllTitle: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+  unlockAllDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  unlockAllPrice: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  unlockAllPriceText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+  },
+  unlockAllPriceSub: {
+    fontSize: 10,
+    fontWeight: '600' as const,
+  },
   themeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -452,32 +653,99 @@ const styles = StyleSheet.create({
   },
   themeCard: {
     width: '47%' as any,
-    borderRadius: 14,
-    padding: 14,
+    minHeight: 176,
+    borderRadius: 18,
+    padding: 16,
     position: 'relative',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    elevation: 4,
   },
   themeCardPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.97 }],
+    opacity: 0.92,
+    transform: [{ scale: 0.985 }],
+  },
+  themeTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginBottom: 10,
+  },
+  themeTonePill: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  themeToneText: {
+    fontSize: 10,
+    fontWeight: '700' as const,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.55,
+  },
+  themePreviewPanel: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 10,
+    marginBottom: 12,
+  },
+  themePreviewChrome: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  previewLine: {
+    height: 4,
+    borderRadius: 999,
+  },
+  themePreviewBody: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  previewMiniCard: {
+    flex: 1,
+    minHeight: 54,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 6,
+  },
+  previewAccentBar: {
+    width: '42%',
+    height: 4,
+    borderRadius: 999,
+  },
+  previewMiniTextRow: {
+    width: '82%',
+    height: 6,
+    borderRadius: 999,
+  },
+  previewMiniTextRowShort: {
+    width: '56%',
+    height: 6,
+    borderRadius: 999,
   },
   themePreview: {
     flexDirection: 'row',
     gap: 6,
-    marginBottom: 10,
+    marginBottom: 2,
   },
   previewDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 16,
+    height: 16,
+    borderRadius: 999,
   },
   themeName: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    marginBottom: 2,
+    fontSize: 15,
+    fontWeight: '700' as const,
+    marginBottom: 3,
   },
   themeDesc: {
     fontSize: 11,
+    lineHeight: 16,
   },
   themeBadge: {
     position: 'absolute',

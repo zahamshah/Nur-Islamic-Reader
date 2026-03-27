@@ -9,6 +9,9 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   fontSize: 17,
   lineHeight: 1.8,
   theme: 'light' as const,
+  speechRate: 1,
+  speechPitch: 1,
+  speechVoiceId: null,
 };
 
 export const [ReaderSettingsProvider, useReaderSettings] = createContextHook(() => {
@@ -20,7 +23,7 @@ export const [ReaderSettingsProvider, useReaderSettings] = createContextHook(() 
       if (raw) {
         try {
           const parsed = JSON.parse(raw) as ReaderSettings;
-          setSettings(parsed);
+          setSettings({ ...DEFAULT_SETTINGS, ...parsed });
         } catch {
           console.log('[ReaderSettings] Failed to parse stored settings');
         }
@@ -49,5 +52,26 @@ export const [ReaderSettingsProvider, useReaderSettings] = createContextHook(() 
     updateSettings({ theme });
   }, [updateSettings]);
 
-  return { settings, loaded, setFontSize, setLineHeight, setTheme };
+  const setSpeechRate = useCallback((speechRate: number) => {
+    updateSettings({ speechRate });
+  }, [updateSettings]);
+
+  const setSpeechPitch = useCallback((speechPitch: number) => {
+    updateSettings({ speechPitch });
+  }, [updateSettings]);
+
+  const setSpeechVoiceId = useCallback((speechVoiceId: string | null) => {
+    updateSettings({ speechVoiceId });
+  }, [updateSettings]);
+
+  return {
+    settings,
+    loaded,
+    setFontSize,
+    setLineHeight,
+    setTheme,
+    setSpeechRate,
+    setSpeechPitch,
+    setSpeechVoiceId,
+  };
 });

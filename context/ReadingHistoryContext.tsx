@@ -19,19 +19,47 @@ export const [ReadingHistoryProvider, useReadingHistory] = createContextHook(() 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loaded, setLoaded] = useState<boolean>(false);
 
+  const mergeHistory = useCallback((current: HistoryEntry[], stored: HistoryEntry[]) => {
+    const map = new Map<string, HistoryEntry>();
+    for (const entry of [...stored, ...current]) {
+      const key = `${entry.seriesId}:${entry.chapterId}`;
+      const existing = map.get(key);
+      if (!existing || entry.timestamp > existing.timestamp) {
+        map.set(key, entry);
+      }
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, MAX_HISTORY);
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as HistoryEntry[];
+      if (!Array.isArray(parsed)) return;
+      setHistory((prev) => mergeHistory(prev, parsed));
+    } catch {
+      console.log('[ReadingHistory] Failed to parse');
+    }
+  }, [mergeHistory]);
+
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
       if (raw) {
         try {
           const parsed = JSON.parse(raw) as HistoryEntry[];
-          setHistory(parsed.slice(0, MAX_HISTORY));
+          if (Array.isArray(parsed)) {
+            setHistory((prev) => mergeHistory(prev, parsed));
+          }
         } catch {
           console.log('[ReadingHistory] Failed to parse');
         }
       }
       setLoaded(true);
     });
-  }, []);
+  }, [mergeHistory]);
 
   const addToHistory = useCallback(
     (entry: Omit<HistoryEntry, 'timestamp'>) => {
@@ -71,5 +99,5 @@ export const [ReadingHistoryProvider, useReadingHistory] = createContextHook(() 
     AsyncStorage.removeItem(STORAGE_KEY);
   }, []);
 
-  return { history, loaded, addToHistory, updateHistoryScroll, clearHistory };
+  return { history, loaded, addToHistory, updateHistoryScroll, clearHistory, refreshHistory };
 });

@@ -5,33 +5,271 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Animated,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Platform,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Share2, Settings, ChevronRight } from 'lucide-react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ArrowLeft, Share2, Settings, ChevronRight, Volume2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import Colors from '@/constants/colors';
+import * as Speech from 'expo-speech';
 import { getChapterById, getSeriesById } from '@/constants/content';
 import { useReaderSettings } from '@/context/ReaderSettingsContext';
 import { useReadingProgress } from '@/context/ReadingProgressContext';
 import { useReadingHistory } from '@/context/ReadingHistoryContext';
 import { useAppSettings } from '@/context/AppSettingsContext';
 import { isDarkTheme } from '@/constants/themes';
-import { GlossaryEntry } from '@/types/content';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
-import GlossaryModal from '@/components/GlossaryModal';
+import { markdownToNarrationText, prepareMarkdownForDisplay } from '@/utils/chapterMarkdown';
 import ShareModal from '@/components/ShareModal';
 import ReaderSettingsSheet from '@/components/ReaderSettingsSheet';
-
-const TIP_KEY = 'glossary_tip_shown';
+import NarrationControlSheet from '@/components/NarrationControlSheet';
 
 interface SectionInfo {
   heading: string;
   text: string;
+}
+
+type SystemVoice = {
+  id: string;
+  name: string;
+  language: string;
+  quality?: string;
+  order?: number;
+};
+
+type DisplayVoice = SystemVoice & {
+  label: string;
+  gender: 'male' | 'female' | 'unknown';
+};
+
+function normalizeSystemVoices(rawVoices: Record<string, unknown>[]): SystemVoice[] {
+  return rawVoices
+    .map((voice, index) => {
+      const identifier =
+        (typeof voice.identifier === 'string' && voice.identifier) ||
+        (typeof voice.id === 'string' && voice.id) ||
+        (typeof voice.name === 'string' && voice.name) ||
+        '';
+      const name =
+        (typeof voice.name === 'string' && voice.name) ||
+        identifier ||
+        'System voice';
+      const language =
+        (typeof voice.language === 'string' && voice.language) || '';
+      const quality =
+        typeof voice.quality === 'string' ? voice.quality : undefined;
+      return {
+        id: identifier,
+        name,
+        language,
+        quality,
+        order: index,
+      };
+    })
+    .filter((voice) => voice.id.length > 0);
+}
+
+function rankVoiceQuality(quality?: string) {
+  if (!quality) return 0;
+  const value = quality.toLowerCase();
+  if (value.includes('premium')) return 3;
+  if (value.includes('enhanced')) return 2;
+  if (value.includes('default')) return 1;
+  return 0;
+}
+
+function inferVoiceGender(voice: SystemVoice) {
+  const source = `${voice.id} ${voice.name}`.toLowerCase();
+
+  if (/\b(female|woman|girl|femme)\b/.test(source)) return 'female' as const;
+  if (/\b(male|man|boy)\b/.test(source)) return 'male' as const;
+
+  const femaleTokens = [
+    'samantha',
+    'susan',
+    'karen',
+    'tessa',
+    'moira',
+    'serena',
+    'amelia',
+    'ava',
+    'allison',
+    'jenny',
+    'jane',
+    'fiona',
+    'emma',
+    'olivia',
+    'aria',
+  ];
+  const maleTokens = [
+    'alex',
+    'aaron',
+    'daniel',
+    'david',
+    'fred',
+    'tom',
+    'thomas',
+    'oliver',
+    'arthur',
+    'mark',
+    'ryan',
+    'guy',
+  ];
+
+  if (femaleTokens.some((token) => source.includes(token))) return 'female' as const;
+  if (maleTokens.some((token) => source.includes(token))) return 'male' as const;
+
+  if (/en[-_]us[-_]x[-_]sfg/.test(source)) return 'female' as const;
+  if (/en[-_]us[-_]x[-_]sfm/.test(source)) return 'male' as const;
+  if (/en[-_]gb[-_]x[-_]gbd/.test(source)) return 'female' as const;
+  if (/en[-_]gb[-_]x[-_]gbc/.test(source)) return 'male' as const;
+  if (/en[-_]us[-_]x[-_]tpc/.test(source)) return 'female' as const;
+  if (/en[-_]us[-_]x[-_]tpd/.test(source)) return 'male' as const;
+  if (/en[-_]au[-_]x[-_]aua/.test(source)) return 'female' as const;
+  if (/en[-_]au[-_]x[-_]auc/.test(source)) return 'male' as const;
+  if (/en[-_]ca[-_]x[-_]cab/.test(source)) return 'female' as const;
+  if (/en[-_]ca[-_]x[-_]cac/.test(source)) return 'male' as const;
+
+  return 'unknown' as const;
+}
+
+function labelSystemVoices(voices: SystemVoice[]): DisplayVoice[] {
+  let maleCount = 0;
+  let femaleCount = 0;
+  let neutralCount = 0;
+
+  return voices.map((voice) => {
+    const gender = inferVoiceGender(voice);
+    let label = '';
+
+    if (gender === 'male') {
+      maleCount += 1;
+      label = `Man ${maleCount}`;
+    } else if (gender === 'female') {
+      femaleCount += 1;
+      label = `Woman ${femaleCount}`;
+    } else {
+      neutralCount += 1;
+      label = `Voice ${neutralCount}`;
+    }
+
+    return {
+      ...voice,
+      label,
+      gender,
+    };
+  });
+}
+
+function pickPreferredVoices(voices: SystemVoice[], prioritizeIds?: Set<string>) {
+  const isPreferredEnglish = (language: string) => /en[-_](us|gb|uk|au|ca)\b/i.test(language);
+  const isEnglish = (language: string) => /^en(\b|[-_])/i.test(language);
+
+  const preferred = voices.filter((voice) => isPreferredEnglish(voice.language));
+  const english = voices.filter((voice) => isEnglish(voice.language));
+  const base = preferred.length > 0 ? preferred : english.length > 0 ? english : voices;
+
+  const noveltyBlocklist = [
+    'grandma',
+    'grandpa',
+    'flo',
+    'novelty',
+    'whisper',
+    'robot',
+    'alien',
+    'cartoon',
+    'comic',
+    'funny',
+    'child',
+    'kid',
+    'chipmunk',
+    'monster',
+    'pirate',
+    'jester',
+    'celebrity',
+    'meme',
+    'sfx',
+  ];
+
+  const filtered = base.filter((voice) => {
+    const name = `${voice.name} ${voice.id}`.toLowerCase();
+    return !noveltyBlocklist.some((token) => name.includes(token));
+  });
+
+  const sorted = [...(filtered.length > 0 ? filtered : base)].sort((a, b) => {
+    const aNew = prioritizeIds?.has(a.id) ? 1 : 0;
+    const bNew = prioritizeIds?.has(b.id) ? 1 : 0;
+    if (aNew !== bNew) return bNew - aNew;
+    const qualityDelta = rankVoiceQuality(b.quality) - rankVoiceQuality(a.quality);
+    if (qualityDelta !== 0) return qualityDelta;
+    return (a.order ?? 0) - (b.order ?? 0);
+  });
+
+  const unique = new Map<string, SystemVoice>();
+  for (const voice of sorted) {
+    const key = `${voice.name}-${voice.language}`;
+    if (!unique.has(key)) {
+      unique.set(key, voice);
+    }
+  }
+
+  const candidates = Array.from(unique.values());
+  const maxVoices = 10;
+  return candidates.slice(0, maxVoices);
+}
+
+function normalizeHeadingKey(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/gi, ' ').trim();
+}
+
+function splitNarrationText(text: string, maxChars = 320): string[] {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+
+  const sentences =
+    normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((s) => s.trim()) ?? [];
+  const chunks: string[] = [];
+  let current = '';
+
+  const pushCurrent = () => {
+    if (current.trim()) {
+      chunks.push(current.trim());
+      current = '';
+    }
+  };
+
+  for (const sentence of sentences) {
+    if (!sentence) continue;
+
+    if (sentence.length > maxChars) {
+      const words = sentence.split(' ');
+      for (const word of words) {
+        if (!word) continue;
+        if ((current.length + word.length + 1) > maxChars) {
+          pushCurrent();
+          current = word;
+        } else {
+          current = current ? `${current} ${word}` : word;
+        }
+      }
+      pushCurrent();
+      continue;
+    }
+
+    if ((current.length + sentence.length + 1) > maxChars) {
+      pushCurrent();
+      current = sentence;
+    } else {
+      current = current ? `${current} ${sentence}` : sentence;
+    }
+  }
+
+  pushCurrent();
+  return chunks.length > 0 ? chunks : [normalized];
 }
 
 function extractSections(markdown: string): SectionInfo[] {
@@ -81,7 +319,7 @@ export default function ReaderScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { settings } = useReaderSettings();
+  const { settings, setSpeechVoiceId } = useReaderSettings();
   const { markProgress, updateScrollPosition, progress } = useReadingProgress();
   const { addToHistory, updateHistoryScroll } = useReadingHistory();
   const { currentThemeId, theme: appTheme } = useAppSettings();
@@ -91,24 +329,167 @@ export default function ReaderScreen() {
   const lastSavedScrollY = useRef<number>(0);
   const contentHeight = useRef<number>(0);
   const viewHeight = useRef<number>(0);
+  const narrationRunId = useRef<number>(0);
+  const speechRateRef = useRef<number>(settings.speechRate);
+  const speechVoiceIdRef = useRef<string | null>(settings.speechVoiceId ?? null);
+  const speechPitchRef = useRef<number>(settings.speechPitch);
+  const knownVoiceIdsRef = useRef<Set<string>>(new Set());
 
-  const [glossaryEntry, setGlossaryEntry] = useState<GlossaryEntry | null>(null);
-  const [glossaryVisible, setGlossaryVisible] = useState<boolean>(false);
   const [shareVisible, setShareVisible] = useState<boolean>(false);
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
-  const [showTip, setShowTip] = useState<boolean>(false);
-  const [tipOpacity] = useState(() => new Animated.Value(0));
+  const [narrationSheetVisible, setNarrationSheetVisible] = useState<boolean>(false);
   const [currentSectionIdx, setCurrentSectionIdx] = useState<number>(0);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [isPreparingNarration, setIsPreparingNarration] = useState<boolean>(false);
+  const [narrationError, setNarrationError] = useState<string | null>(null);
+  const [displayVoices, setDisplayVoices] = useState<DisplayVoice[]>([]);
+  const [voicesLoaded, setVoicesLoaded] = useState<boolean>(false);
+  const [startMode, setStartMode] = useState<'beginning' | 'current' | 'custom'>('current');
+  const [customStartSectionIdx, setCustomStartSectionIdx] = useState<number | null>(null);
+  const [isSelectingStartPoint, setIsSelectingStartPoint] = useState<boolean>(false);
 
   const result = useMemo(
     () => getChapterById(seriesId ?? '', chapterId ?? ''),
     [seriesId, chapterId]
   );
 
-  const sections = useMemo(() => {
-    if (!result) return [];
-    return extractSections(result.chapter.text);
+  const displayMarkdown = useMemo(() => {
+    if (!result) return '';
+    return prepareMarkdownForDisplay(result.chapter.text, result.chapter.title);
   }, [result]);
+
+  const sections = useMemo(() => {
+    if (!displayMarkdown) return [];
+    return extractSections(displayMarkdown);
+  }, [displayMarkdown]);
+
+  const ttsText = useMemo(() => {
+    if (!result) return '';
+    return markdownToNarrationText(result.chapter.text, result.chapter.title);
+  }, [result]);
+
+  const sectionIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sections.forEach((section, index) => {
+      const key = normalizeHeadingKey(section.heading);
+      if (!map.has(key)) {
+        map.set(key, index);
+      }
+    });
+    return map;
+  }, [sections]);
+
+  const buildNarrationFromSection = useCallback(
+    (index: number | null) => {
+      if (!sections.length || index === null || index < 0 || index >= sections.length) {
+        return ttsText;
+      }
+      const slice = sections.slice(index);
+      return slice
+        .map((section) => `${section.heading}. ${section.text}`.trim())
+        .join('\n');
+    },
+    [sections, ttsText]
+  );
+
+  const resolveNarrationText = useCallback(() => {
+    if (startMode === 'custom' && customStartSectionIdx !== null) {
+      return buildNarrationFromSection(customStartSectionIdx);
+    }
+    if (startMode === 'current' && sections.length > 0) {
+      return buildNarrationFromSection(currentSectionIdx);
+    }
+    return ttsText;
+  }, [
+    buildNarrationFromSection,
+    currentSectionIdx,
+    customStartSectionIdx,
+    sections.length,
+    startMode,
+    ttsText,
+  ]);
+
+  useEffect(() => {
+    speechRateRef.current = settings.speechRate;
+  }, [settings.speechRate]);
+
+  useEffect(() => {
+    speechPitchRef.current = settings.speechPitch;
+  }, [settings.speechPitch]);
+
+  useEffect(() => {
+    speechVoiceIdRef.current = settings.speechVoiceId ?? null;
+  }, [settings.speechVoiceId]);
+
+  const loadSystemVoices = useCallback(() => {
+    if (Platform.OS === 'web') {
+      setVoicesLoaded(true);
+      return;
+    }
+
+    Speech.getAvailableVoicesAsync()
+      .then((voices) => {
+        const normalized = normalizeSystemVoices(voices as Record<string, unknown>[]);
+        const newIds = new Set<string>();
+        for (const voice of normalized) {
+          if (!knownVoiceIdsRef.current.has(voice.id)) {
+            newIds.add(voice.id);
+          }
+        }
+        knownVoiceIdsRef.current = new Set(normalized.map((voice) => voice.id));
+        const preferred = pickPreferredVoices(normalized, newIds);
+        setDisplayVoices(labelSystemVoices(preferred));
+        setVoicesLoaded(true);
+      })
+      .catch(() => {
+        setDisplayVoices([]);
+        setVoicesLoaded(true);
+      });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (cancelled) return;
+    loadSystemVoices();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSystemVoices]);
+
+  useEffect(() => {
+    if (!narrationSheetVisible) return;
+    loadSystemVoices();
+  }, [loadSystemVoices, narrationSheetVisible]);
+
+  useEffect(() => {
+    const handler = (state: AppStateStatus) => {
+      if (state === 'active') {
+        loadSystemVoices();
+      }
+    };
+    const subscription = AppState.addEventListener('change', handler);
+    return () => {
+      subscription.remove();
+    };
+  }, [loadSystemVoices]);
+
+  useEffect(() => {
+    if (!voicesLoaded || displayVoices.length === 0) return;
+    const exists = displayVoices.some((voice) => voice.id === settings.speechVoiceId);
+    if (!exists) {
+      setSpeechVoiceId(displayVoices[0].id);
+    }
+  }, [displayVoices, setSpeechVoiceId, settings.speechVoiceId, voicesLoaded]);
+
+  const narrationSupported = useMemo(
+    () => Platform.OS !== 'web' && displayVoices.length > 0,
+    [displayVoices.length]
+  );
+
+  const customStartLabel = useMemo(() => {
+    if (customStartSectionIdx === null) return null;
+    return sections[customStartSectionIdx]?.heading ?? null;
+  }, [customStartSectionIdx, sections]);
 
   const series = useMemo(() => getSeriesById(seriesId ?? ''), [seriesId]);
 
@@ -191,7 +572,7 @@ export default function ReaderScreen() {
         setCurrentSectionIdx(Math.max(0, idx));
       }
     },
-    [updateScrollPosition]
+    [updateScrollPosition, updateHistoryScroll, seriesId, chapterId, sections.length]
   );
 
   const handleScrollEnd = useCallback(
@@ -211,38 +592,166 @@ export default function ReaderScreen() {
   );
 
   useEffect(() => {
-    AsyncStorage.getItem(TIP_KEY).then((val) => {
-      if (!val) {
-        setShowTip(true);
-        Animated.timing(tipOpacity, {
-          toValue: 1,
-          duration: 600,
-          delay: 1200,
-          useNativeDriver: true,
-        }).start();
+    return () => {
+      narrationRunId.current += 1;
+      Speech.stop();
+    };
+  }, []);
+
+  const stopNarration = useCallback(() => {
+    narrationRunId.current += 1;
+    setIsPreparingNarration(false);
+    setIsSpeaking(false);
+    Speech.stop();
+  }, []);
+
+  useEffect(() => {
+    void stopNarration();
+    setNarrationError(null);
+  }, [chapterId, seriesId, stopNarration]);
+
+  const startNarrationWithText = useCallback(
+    (baseText: string) => {
+      if (!baseText.trim()) {
+        return;
       }
-    });
-  }, [tipOpacity]);
 
-  const dismissTip = useCallback(() => {
-    Animated.timing(tipOpacity, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => {
-      setShowTip(false);
-      AsyncStorage.setItem(TIP_KEY, 'true');
-    });
-  }, [tipOpacity]);
+      if (Platform.OS === 'web') {
+        setNarrationError('Voice playback is not available on the web build.');
+        return;
+      }
 
-  const handleGlossaryTap = useCallback((entry: GlossaryEntry) => {
-    setGlossaryEntry(entry);
-    setGlossaryVisible(true);
+      if (!voicesLoaded || displayVoices.length === 0) {
+        setNarrationError(
+          'No system voices were found. Download a voice in your device TTS settings.'
+        );
+        return;
+      }
+
+      const runId = narrationRunId.current + 1;
+      narrationRunId.current = runId;
+      setNarrationError(null);
+      setIsPreparingNarration(true);
+
+      const chunks = splitNarrationText(baseText);
+      const voiceId = speechVoiceIdRef.current ?? displayVoices[0]?.id ?? undefined;
+
+      Speech.stop();
+
+      const speakNext = (index: number) => {
+        if (narrationRunId.current !== runId) return;
+        if (index >= chunks.length) {
+          setIsSpeaking(false);
+          setIsPreparingNarration(false);
+          return;
+        }
+
+        const text = chunks[index];
+        if (!text) {
+          speakNext(index + 1);
+          return;
+        }
+
+        if (index === 0) {
+          setIsPreparingNarration(false);
+          setIsSpeaking(true);
+        }
+
+        Speech.speak(text, {
+          voice: voiceId,
+          rate: speechRateRef.current,
+          pitch: speechPitchRef.current,
+          onDone: () => speakNext(index + 1),
+          onStopped: () => {
+            if (narrationRunId.current === runId) {
+              setIsSpeaking(false);
+            }
+          },
+          onError: () => {
+            if (narrationRunId.current !== runId) return;
+            setIsSpeaking(false);
+            setIsPreparingNarration(false);
+            setNarrationError('Narration could not be started.');
+          },
+        });
+      };
+
+      speakNext(0);
+    },
+    [displayVoices, voicesLoaded]
+  );
+
+  const handleToggleNarration = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    if (!ttsText) {
+      return;
+    }
+
+    if (isSpeaking || isPreparingNarration) {
+      stopNarration();
+      return;
+    }
+
+    if (isSelectingStartPoint) {
+      setIsSelectingStartPoint(false);
+    }
+
+    startNarrationWithText(resolveNarrationText());
+  }, [
+    isPreparingNarration,
+    isSelectingStartPoint,
+    isSpeaking,
+    resolveNarrationText,
+    startNarrationWithText,
+    stopNarration,
+    ttsText,
+  ]);
+
+  const handlePickStartPoint = useCallback(() => {
+    setStartMode('custom');
+    setIsSelectingStartPoint(true);
+    setNarrationSheetVisible(false);
   }, []);
 
-  const handleGlossaryClose = useCallback(() => {
-    setGlossaryVisible(false);
+  const handleCancelStartPoint = useCallback(() => {
+    setIsSelectingStartPoint(false);
   }, []);
+
+  const handleHeadingPress = useCallback(
+    (heading: string) => {
+      if (!isSelectingStartPoint) return;
+      const key = normalizeHeadingKey(heading);
+      const idx = sectionIndexMap.get(key);
+      if (idx === undefined) {
+        setIsSelectingStartPoint(false);
+        return;
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setCustomStartSectionIdx(idx);
+      setStartMode('custom');
+      setIsSelectingStartPoint(false);
+      stopNarration();
+      startNarrationWithText(buildNarrationFromSection(idx));
+    },
+    [
+      buildNarrationFromSection,
+      isSelectingStartPoint,
+      sectionIndexMap,
+      startNarrationWithText,
+      stopNarration,
+    ]
+  );
+
+  const handleStartModeChange = useCallback(
+    (mode: 'beginning' | 'current' | 'custom') => {
+      setStartMode(mode);
+      if (mode !== 'custom') {
+        setIsSelectingStartPoint(false);
+      }
+    },
+    []
+  );
 
   const handleNextChapter = useCallback(() => {
     if (nextChapter && seriesId) {
@@ -270,8 +779,7 @@ export default function ReaderScreen() {
   }
 
   const { chapter } = result;
-  const glossary = result.series.glossary;
-  const plainExcerpt = chapter.text
+  const plainExcerpt = displayMarkdown
     .replace(/\[\[([^\]|]+)\|[^\]]+\]\]/g, '$1')
     .replace(/[#*>\-_]/g, '')
     .trim()
@@ -328,6 +836,20 @@ export default function ReaderScreen() {
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setNarrationSheetVisible(true);
+            }}
+            style={({ pressed }) => [
+              styles.toolbarBtn,
+              { backgroundColor: colors.tagBg },
+              pressed && styles.toolbarBtnPressed,
+            ]}
+            hitSlop={8}
+          >
+            <Volume2 size={17} color={isSpeaking ? colors.accent : textColor} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setSettingsVisible(true);
             }}
             style={({ pressed }) => [
@@ -341,6 +863,29 @@ export default function ReaderScreen() {
           </Pressable>
         </View>
       </View>
+
+      {isSelectingStartPoint ? (
+        <View
+          style={[
+            styles.startPointBanner,
+            { backgroundColor: colors.accentMuted, borderBottomColor: borderColor },
+          ]}
+        >
+          <Text style={[styles.startPointText, { color: colors.textSecondary }]}>
+            Tap a heading to start reading from there.
+          </Text>
+          <Pressable
+            onPress={handleCancelStartPoint}
+            style={({ pressed }) => [
+              styles.startPointBtn,
+              { backgroundColor: colors.tagBg },
+              pressed && styles.toolbarBtnPressed,
+            ]}
+          >
+            <Text style={[styles.startPointBtnText, { color: colors.accent }]}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ScrollView
         ref={scrollRef}
@@ -356,32 +901,6 @@ export default function ReaderScreen() {
         onContentSizeChange={handleContentSizeChange}
         scrollEventThrottle={64}
       >
-        {showTip ? (
-          <Animated.View style={[styles.tipContainer, { opacity: tipOpacity }]}>
-            <Pressable
-              onPress={dismissTip}
-              style={[
-                styles.tip,
-                {
-                  backgroundColor: colors.accentMuted,
-                  borderColor: dark ? 'rgba(196,154,60,0.25)' : 'rgba(196,154,60,0.2)',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.tipText,
-                  { color: colors.tagText },
-                ]}
-              >
-                💡 Tap highlighted terms to explore key concepts
-              </Text>
-              <Text style={[styles.tipDismiss, { color: colors.accent }]}>
-                Dismiss
-              </Text>
-            </Pressable>
-          </Animated.View>
-        ) : null}
 
         <View
           style={[
@@ -394,6 +913,7 @@ export default function ReaderScreen() {
         >
           <MarkdownRenderer
             markdown={chapter.text}
+            chapterTitle={chapter.title}
             fontSize={settings.fontSize}
             lineHeight={settings.lineHeight}
             themeColors={{
@@ -406,8 +926,8 @@ export default function ReaderScreen() {
               accentLight: colors.accentLight,
             }}
             isDark={dark}
-            glossary={glossary}
-            onGlossaryTap={handleGlossaryTap}
+            onHeadingPress={handleHeadingPress}
+            selectableHeadings={isSelectingStartPoint}
           />
         </View>
 
@@ -446,14 +966,6 @@ export default function ReaderScreen() {
         ) : null}
       </ScrollView>
 
-      <GlossaryModal
-        entry={glossaryEntry}
-        visible={glossaryVisible}
-        onClose={handleGlossaryClose}
-        themeColors={colors}
-        isDark={dark}
-      />
-
       <ShareModal
         visible={shareVisible}
         onClose={() => setShareVisible(false)}
@@ -471,7 +983,28 @@ export default function ReaderScreen() {
         visible={settingsVisible}
         onClose={() => setSettingsVisible(false)}
         themeColors={colors}
-        isDark={dark}
+      />
+
+      <NarrationControlSheet
+        visible={narrationSheetVisible}
+        onClose={() => setNarrationSheetVisible(false)}
+        themeColors={colors}
+        isSpeaking={isSpeaking}
+        onTogglePlayback={handleToggleNarration}
+        isPreparing={isPreparingNarration}
+        narrationSupported={narrationSupported}
+        narrationError={narrationError}
+        voices={displayVoices.map((voice) => ({
+          id: voice.id,
+          label: voice.label,
+          language: voice.language,
+          quality: voice.quality,
+        }))}
+        voicesLoaded={voicesLoaded}
+        startMode={startMode}
+        onStartModeChange={handleStartModeChange}
+        onPickStartPoint={handlePickStartPoint}
+        customStartLabel={customStartLabel}
       />
     </View>
   );
@@ -513,46 +1046,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  tipContainer: {
-    marginBottom: 14,
-  },
-  tip: {
+  startPointBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    gap: 12,
   },
-  tipText: {
-    fontSize: 13,
-    fontWeight: '500' as const,
+  startPointText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600' as const,
+  },
+  startPointBtn: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  startPointBtnText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.4,
+  },
+  scroll: {
     flex: 1,
   },
-  tipDismiss: {
-    fontSize: 13,
-    fontWeight: '600' as const,
-    marginLeft: 12,
+  scrollContent: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
   },
   readerCard: {
-    borderRadius: 16,
-    padding: 22,
+    borderRadius: 20,
+    padding: 24,
     borderWidth: 1,
   },
   nextChapter: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 20,
-    padding: 18,
-    borderRadius: 14,
+    padding: 20,
+    borderRadius: 16,
     borderWidth: 1,
     gap: 12,
   },
