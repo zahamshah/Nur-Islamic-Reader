@@ -1,4 +1,4 @@
-# Nur
+# Nūr
 
 Premium Islamic reader built with Expo Router and React Native.
 
